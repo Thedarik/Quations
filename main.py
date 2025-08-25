@@ -1,10 +1,15 @@
 from fastapi import FastAPI, Form, HTTPException, Depends, UploadFile, File, Query
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import Optional, List
 import json
 import os
 import random
+import logging
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -28,6 +33,16 @@ app = FastAPI(
     ]
 )
 
+# CORS middleware qo'shish
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # -------------------------------------------------
 # Storage & constants
 # -------------------------------------------------
@@ -35,10 +50,27 @@ USERS_FILE = "users.json"
 DATA_FILE = "data.json"
 UPLOADS_DIR = "uploads"
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
 # JWT settings
-SECRET_KEY = "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET"  # Real loyihada .env dan oling!
+SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_CHANGE_IN_PRODUCTION")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -49,6 +81,24 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 # Uploads papkasini yaratish
 if not os.path.exists(UPLOADS_DIR):
     os.makedirs(UPLOADS_DIR)
+
+# Static files uchun uploads papkasini mount qilish
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+# Global exception handlers
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Noto'g'ri ma'lumotlar kiritildi", "errors": str(exc)}
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Server xatoligi yuz berdi", "error": str(exc)}
+    )
 
 # -------------------------------------------------
 # Pydantic models
@@ -148,12 +198,27 @@ def get_current_user(token: str) -> dict:
     return user_data
 
 # -------------------------------------------------
+# Health check
+# -------------------------------------------------
+@app.get("/health", tags=["System"])
+def health_check():
+    """Server holatini tekshirish"""
+    logger.info("Health check requested")
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.0.0"
+    }
+
+# -------------------------------------------------
 # Auth endpoints
 # -------------------------------------------------
-@app.post("/register", tags=["Authentication"])
 def register(username: str = Form(...), password: str = Form(...)):
+    logger.info(f"Registration attempt for username: {username}")
+    
     users = load_users()
     if any(u.get("user") == username for u in users):
+        logger.warning(f"Registration failed: username {username} already exists")
         raise HTTPException(status_code=400, detail="Bunday foydalanuvchi allaqachon mavjud")
 
     # Yangi foydalanuvchi yaratish
@@ -170,13 +235,17 @@ def register(username: str = Form(...), password: str = Form(...)):
     
     users.append(new_user)
     save_users(users)
+    logger.info(f"User {username} successfully registered")
     return {"access_token": token, "token_type": "bearer", "username": username}
 
 @app.post("/login", tags=["Authentication"])
 def login(username: str = Form(...), password: str = Form(...)):
+    logger.info(f"Login attempt for username: {username}")
+    
     users = load_users()
     user = next((u for u in users if u.get("user") == username), None)
     if not user or not verify_password(password, user.get("hashed_password", "")):
+        logger.warning(f"Login failed for username: {username} - invalid credentials")
         raise HTTPException(status_code=401, detail="Login yoki parol noto'g'ri")
     
     # Yangi token yaratish va saqlash
@@ -184,6 +253,7 @@ def login(username: str = Form(...), password: str = Form(...)):
     user["token"] = token
     save_users(users)
     
+    logger.info(f"User {username} successfully logged in")
     return {"access_token": token, "token_type": "bearer", "username": user["user"]}
 
 # -------------------------------------------------
@@ -297,13 +367,22 @@ def create_question(
     # Rasmni saqlash (agar rasm kiritilgan bo'lsa)
     image_path = None
     if image and hasattr(image, 'filename') and image.filename and image.size > 0:
-        if image.content_type not in ["image/jpeg", "image/png"]:
-            raise HTTPException(status_code=400, detail="Faqat JPEG yoki PNG rasmlar ruxsat etilgan")
-        if image.size > 5 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="Rasm hajmi 5MB dan oshmasligi kerak")
+        # File type validation
+        allowed_types = os.getenv("ALLOWED_IMAGE_TYPES", "image/jpeg,image/png").split(",")
+        if image.content_type not in allowed_types:
+            raise HTTPException(status_code=400, detail=f"Faqat {', '.join(allowed_types)} formatlar ruxsat etilgan")
         
+        # File size validation
+        max_size = int(os.getenv("MAX_FILE_SIZE", "5242880"))  # 5MB default
+        if image.size > max_size:
+            max_size_mb = max_size / (1024 * 1024)
+            raise HTTPException(status_code=400, detail=f"Rasm hajmi {max_size_mb}MB dan oshmasligi kerak")
+        
+        # Generate unique filename
         image_filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{image.filename}"
         image_path = os.path.join(UPLOADS_DIR, image_filename)
+        
+        # Save file
         with open(image_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
     
@@ -438,4 +517,6 @@ def get_test_questions(
 # -------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host=host, port=port)
