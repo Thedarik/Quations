@@ -2,7 +2,7 @@ from fastapi import FastAPI, Form, HTTPException, Depends, UploadFile, File, Que
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import Optional, List
@@ -14,6 +14,10 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import shutil
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from io import BytesIO
 
 # -------------------------------------------------
 # App meta
@@ -576,6 +580,91 @@ def get_test_questions(
         "shuffle_answers": shuffle_answers,
         "questions": group_questions
     }
+
+@app.get("/questions/pdf", tags=["Questions"])
+def get_questions_pdf(
+    token: str = Query(...),
+    group_title: str = Query(...),
+):
+    """Berilgan guruh savollarini A4 formatdagi PDF fayl sifatida qaytarish"""
+    logger.info(f"Generating PDF for group: {group_title}")
+    
+    # Tokenni tekshirish va foydalanuvchini olish
+    current_user = get_current_user_by_token(token)
+    
+    # Guruh savollarini olish (avvalgi logikaga o'xshash)
+    data = load_data()
+    user_data = next((ud for ud in data if ud.get("user_id") == current_user.get("id")), None)
+    
+    if not user_data:
+        raise HTTPException(status_code=404, detail="Foydalanuvchi ma'lumotlari topilmadi")
+    
+    target_group = next((g for g in user_data.get("quations", []) if g.get("title") == group_title), None)
+    
+    if not target_group:
+        raise HTTPException(status_code=404, detail=f"'{group_title}' nomli guruh topilmadi")
+    
+    questions = target_group.get("quations", [])
+    
+    if not questions:
+        raise HTTPException(status_code=404, detail=f"'{group_title}' guruhida savollar topilmadi")
+    
+    # PDF generatsiya
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    
+    # Font sozlamalari (chiroyli ko'rinish uchun)
+    c.setFont("Helvetica-Bold", 14)  # Savol uchun qalin font
+    y = height - 50  # Tepadan boshlash (margins)
+    
+    for idx, q in enumerate(questions, 1):
+        # Savol matni (bold)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(50, y, f"{idx}. {q['text']}")
+        y -= 30  # Bo'sh joy
+        
+        # Rasm bo'lsa, qo'shish
+        if q.get('image'):
+            try:
+                img = ImageReader(q['image'])
+                img_width, img_height = img.getSize()
+                aspect = img_height / float(img_width)
+                draw_width = width - 100  # Sahifa kengligiga moslash
+                draw_height = draw_width * aspect
+                if draw_height > 200:  # Maksimal balandlik cheklovi
+                    draw_height = 200
+                    draw_width = draw_height / aspect
+                c.drawImage(img, 50, y - draw_height, width=draw_width, height=draw_height)
+                y -= draw_height + 20
+            except Exception as e:
+                logger.error(f"Rasm yuklashda xato: {e}")
+                c.setFont("Helvetica", 10)
+                c.drawString(50, y, "[Rasm yuklanmadi]")
+                y -= 20
+        
+        # Javob variantlari (oddiy font)
+        c.setFont("Helvetica", 12)
+        for ans_idx, ans in enumerate(q['answers'], 1):
+            c.drawString(70, y, f"{chr(64 + ans_idx)}. {ans['text']}")  # A., B., C., D. formatida
+            y -= 20
+        
+        y -= 40  # Savollar orasida bo'sh joy
+        
+        # Agar sahifa pastki qismiga yetib qolsa, yangi sahifa
+        if y < 100:
+            c.showPage()
+            y = height - 50
+            c.setFont("Helvetica-Bold", 14)
+    
+    c.save()
+    buffer.seek(0)
+    
+    # PDF ni response sifatida qaytarish
+    headers = {
+        "Content-Disposition": f"attachment; filename={group_title}_questions.pdf"
+    }
+    return StreamingResponse(buffer, media_type="application/pdf", headers=headers)
 
 # -------------------------------------------------
 # Run
