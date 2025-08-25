@@ -1,0 +1,207 @@
+================================================================================
+                        UZQUIZ CRAFT BACKEND - TO'LIQ MA'LUMOT
+================================================================================
+
+🎯 LOYIHA MAQSADI:
+- O'qituvchilar uchun test savollarini yaratish va boshqarish tizimi
+- O'quvchilar uchun test o'tkazish imkoniyati
+- Ko'p foydalanuvchili, xavfsiz va professional quiz platformasi
+
+🚀 TEXNOLOGIYALAR:
+- Backend: FastAPI (Python)
+- Autentifikatsiya: JWT (JSON Web Token)
+- Parol himoyasi: bcrypt
+- Ma'lumotlar: JSON fayllar
+- Rasm yuklash: multipart/form-data
+- API dokumentatsiya: Swagger UI
+
+📁 FAYL STRUKTURASI:
+chek_test/
+├── main.py              # Asosiy FastAPI dastur
+├── requirements.txt     # Python kutubxonalari
+├── users.json          # Foydalanuvchilar ma'lumotlari
+├── data.json           # Quiz savollari va guruhlari
+├── uploads/            # Yuklangan rasmlar
+├── info.txt            # Bu ma'lumot fayli
+└── README.md           # Loyiha hujjati
+
+🔐 API ENDPOINT'LAR:
+
+1. AUTHENTICATION:
+   POST /register - Foydalanuvchi ro'yxatdan o'tish
+   POST /login - Tizimga kirish
+
+2. GROUPS:
+   POST /groups - Yangi guruh yaratish (Matematika, Fizika...)
+
+3. QUESTIONS:
+   POST /questions - Yangi savol yaratish (4 javob variant)
+   GET /questions/all - Barcha savollarni olish
+   GET /questions/test - Test uchun savollarni olish
+
+4. USERS:
+   GET /users - Barcha foydalanuvchilarni olish
+   DELETE /users/{username} - Foydalanuvchini o'chirish
+   DELETE /users - Barcha foydalanuvchilarni o'chirish
+
+5. SYSTEM:
+   GET /health - Server holatini tekshirish
+
+🌐 URL: https://it-zone.uz/
+
+📋 CURL KOMANDALARI:
+
+REGISTER:
+curl -X POST "https://it-zone.uz/register" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=teacher1&password=123456"
+
+LOGIN:
+curl -X POST "https://it-zone.uz/login" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=teacher1&password=123456"
+
+CREATE GROUP:
+curl -X POST "https://it-zone.uz/groups" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "token=YOUR_TOKEN&title=Matematika"
+
+CREATE QUESTION:
+curl -X POST "https://it-zone.uz/questions" \
+  -H "Content-Type: multipart/form-data" \
+  -F "token=YOUR_TOKEN" \
+  -F "group_title=Matematika" \
+  -F "text=2+2=?" \
+  -F "answer1=3" \
+  -F "answer2=4" \
+  -F "answer3=5" \
+  -F "answer4=6" \
+  -F "correct_answer=2"
+
+GET QUESTIONS:
+curl -X GET "https://it-zone.uz/questions/all" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+GET TEST:
+curl -X GET "https://it-zone.uz/questions/test?token=YOUR_TOKEN&group_title=Matematika"
+
+🔒 XAVFSIZLIK:
+- JWT token muddati: 60 daqiqa
+- Parollar bcrypt bilan hashlanadi
+- CORS himoyasi: faqat it-zone.uz domeni
+- Rasm formatlari: JPEG, PNG
+- Maksimal rasm hajmi: 5MB
+
+📊 MA'LUMOTLAR STRUKTURASI:
+
+users.json:
+[
+  {
+    "id": 1,
+    "user": "username",
+    "hashed_password": "bcrypt_hash",
+    "token": "jwt_token",
+    "created_at": "timestamp"
+  }
+]
+
+data.json:
+[
+  {
+    "id": 1,
+    "user_id": 1,
+    "created_by": "username",
+    "quations": [
+      {
+        "id": 1,
+        "title": "Guruh nomi",
+        "quations": [
+          {
+            "id": 1,
+            "text": "Savol matni",
+            "answers": [
+              {"text": "Javob 1", "is_correct": true},
+              {"text": "Javob 2", "is_correct": false}
+            ],
+            "image": "uploads/filename.jpg",
+            "created_at": "timestamp"
+          }
+        ]
+      }
+    ]
+  }
+]
+
+⚙️ O'RNATISH VA ISHGA TUSHIRISH:
+
+1. Python 3.8+ o'rnatish
+2. Virtual environment yaratish: python -m venv venv
+3. Faollashtirish: source venv/bin/activate
+4. Kutubxonalarni o'rnatish: pip install -r requirements.txt
+5. Dasturni ishga tushirish: python main.py
+
+🔧 ENVIRONMENT VARIABLES (.env):
+SECRET_KEY=your_secret_key
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+HOST=0.0.0.0
+PORT=8000
+ALLOWED_ORIGINS=https://it-zone.uz
+MAX_FILE_SIZE=5242880
+ALLOWED_IMAGE_TYPES=image/jpeg,image/png
+
+📚 API DOKUMENTATSIYA:
+- Swagger UI: https://it-zone.uz/docs
+- ReDoc: https://it-zone.uz/redoc
+
+🎓 QANDAY ISHLAYDI:
+
+1. O'QITUVCHI:
+   - Ro'yxatdan o'tadi (/register)
+   - Tizimga kiradi (/login)
+   - Fan bo'yicha guruh yaratadi (/groups)
+   - Guruhga savollar qo'shadi (/questions)
+
+2. O'QUVCHI:
+   - Ro'yxatdan o'tadi yoki kiradi
+   - Qaysi fandan test o'tkazishini tanlaydi
+   - Test savollarini oladi (/questions/test)
+   - Javoblarni yozadi va natijalarni ko'radi
+
+3. ADMINISTRATOR:
+   - Barcha foydalanuvchilarni ko'radi (/users)
+   - Keraksiz foydalanuvchilarni o'chiradi
+   - Tizim holatini nazorat qiladi (/health)
+
+🔄 ISH JARAYONI:
+
+1. Foydalanuvchi ro'yxatdan o'tadi → JWT token oladi
+2. Token bilan guruh yaratadi (Matematika, Fizika...)
+3. Guruhga 4 javob variantli savollar qo'shadi
+4. O'quvchi test o'tkazish uchun so'raydi
+5. Server savollarni aralashtirib beradi
+6. O'quvchi javoblarni yozadi va natijalarni oladi
+
+🐛 XATOLIKLAR:
+- 400: Noto'g'ri ma'lumotlar
+- 401: Token yo'q yoki noto'g'ri
+- 404: Ma'lumot topilmadi
+- 500: Server xatoligi
+
+📈 AFZALLIKLAR:
+- Ko'p foydalanuvchili
+- Xavfsiz autentifikatsiya
+- Rasm bilan savollar
+- Savollarni aralashtirish
+- Guruhlar bo'yicha tashkil qilish
+- Professional API
+- To'liq dokumentatsiya
+
+🚀 PRODUCTION:
+- Gunicorn + Uvicorn worker
+- Nginx reverse proxy
+- SSL sertifikat
+- Monitoring va logging
+
+================================================================================
+                        LOYIHA TAYYOR VA ISHGA TUSHIRISHGA TAYYOR!
+================================================================================

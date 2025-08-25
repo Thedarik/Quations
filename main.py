@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, HTTPException, Depends, UploadFile, File, Query
+from fastapi import FastAPI, Form, HTTPException, Depends, UploadFile, File, Query, Header
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -19,8 +19,8 @@ import shutil
 # App meta
 # -------------------------------------------------
 app = FastAPI(
-    title="TEST (Multi-user + JWT + Questions)", 
-    version="2.0.0",
+    title="UzQuiz Craft - Professional Quiz Platform", 
+    version="3.0.0",
     openapi_tags=[
         {
             "name": "Authentication",
@@ -29,15 +29,18 @@ app = FastAPI(
         {
             "name": "Questions",
             "description": "Savollar bilan ishlash: kiritish va olish"
+        },
+        {
+            "name": "System",
+            "description": "Tizim holati va monitoring"
         }
     ]
 )
 
-# CORS middleware qo'shish
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+# CORS middleware qo'shish - TEST UCHUN BARCHA DOMENLARNI RUXSAT BERISH
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=["*"],  # Test uchun barcha domenlar
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,10 +53,8 @@ USERS_FILE = "users.json"
 DATA_FILE = "data.json"
 UPLOADS_DIR = "uploads"
 
-import os
-from dotenv import load_dotenv
-
 # Load environment variables
+from dotenv import load_dotenv
 load_dotenv()
 
 # Logging configuration
@@ -95,6 +96,7 @@ async def validation_exception_handler(request, exc):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
+    logger.error(f"Global exception: {exc}")
     return JSONResponse(
         status_code=500,
         content={"detail": "Server xatoligi yuz berdi", "error": str(exc)}
@@ -136,11 +138,16 @@ def safe_load_json(filepath: str) -> list:
                 return []
             return json.loads(content)
     except json.JSONDecodeError:
+        logger.error(f"JSON decode error for file: {filepath}")
         return []
 
 def save_json(filepath: str, data: list):
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving JSON file {filepath}: {e}")
+        raise
 
 def load_users() -> list:
     return safe_load_json(USERS_FILE)
@@ -191,15 +198,33 @@ def decode_access_token(token: str) -> Optional[dict]:
     except JWTError:
         return None
 
-def get_current_user(token: str) -> dict:
+def get_current_user_by_token(token: str) -> dict:
+    """Token orqali foydalanuvchini olish"""
     user_data = get_user_by_token(token)
     if not user_data:
         raise HTTPException(status_code=401, detail="Token noto'g'ri yoki muddati tugagan")
     return user_data
 
+def get_current_user_by_header(authorization: str = Header(None)) -> dict:
+    """Authorization header orqali foydalanuvchini olish"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization header kerak")
+    
+    token = authorization.split(" ")[1]
+    return get_current_user_by_token(token)
+
 # -------------------------------------------------
 # Health check
 # -------------------------------------------------
+@app.get("/", tags=["System"])
+def root():
+    """Root endpoint"""
+    return {
+        "message": "UzQuiz Craft API ishlamoqda!",
+        "version": "3.0.0",
+        "status": "active"
+    }
+
 @app.get("/health", tags=["System"])
 def health_check():
     """Server holatini tekshirish"""
@@ -207,14 +232,24 @@ def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "2.0.0"
+        "version": "3.0.0",
+        "users_count": len(load_users()),
+        "questions_count": len(load_data())
     }
 
 # -------------------------------------------------
-# Auth endpoints
+# Auth endpoints - TUZATILGAN!
 # -------------------------------------------------
+@app.post("/register", tags=["Authentication"])
 def register(username: str = Form(...), password: str = Form(...)):
+    """Foydalanuvchi ro'yxatdan o'tkazish"""
     logger.info(f"Registration attempt for username: {username}")
+    
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="Username kamida 3 belgi bo'lishi kerak")
+    
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Parol kamida 6 belgi bo'lishi kerak")
     
     users = load_users()
     if any(u.get("user") == username for u in users):
@@ -240,6 +275,7 @@ def register(username: str = Form(...), password: str = Form(...)):
 
 @app.post("/login", tags=["Authentication"])
 def login(username: str = Form(...), password: str = Form(...)):
+    """Tizimga kirish"""
     logger.info(f"Login attempt for username: {username}")
     
     users = load_users()
@@ -259,13 +295,15 @@ def login(username: str = Form(...), password: str = Form(...)):
 # -------------------------------------------------
 # User management
 # -------------------------------------------------
-@app.get("/users", response_model=list[UserPublic], tags=["Authentication"])
-def get_all_users(current_user: dict = Depends(get_current_user)):
+@app.get("/users", response_model=List[UserPublic], tags=["Authentication"])
+def get_all_users(current_user: dict = Depends(get_current_user_by_header)):
+    """Barcha foydalanuvchilarni olish"""
     users = load_users()
     return [{"username": u.get("user", "")} for u in users]
 
 @app.delete("/users/{username}", tags=["Authentication"])
-def delete_user(username: str, current_user: dict = Depends(get_current_user)):
+def delete_user(username: str, current_user: dict = Depends(get_current_user_by_header)):
+    """Foydalanuvchini o'chirish"""
     users = load_users()
     user = next((u for u in users if u.get("user") == username), None)
     if not user:
@@ -283,7 +321,8 @@ def delete_user(username: str, current_user: dict = Depends(get_current_user)):
     return {"message": f"{username} foydalanuvchisi o'chirildi"}
 
 @app.delete("/users", tags=["Authentication"])
-def delete_all_users(current_user: dict = Depends(get_current_user)):
+def delete_all_users(current_user: dict = Depends(get_current_user_by_header)):
+    """Barcha foydalanuvchilarni o'chirish"""
     save_users([])
     save_data([])
     return {"message": "Barcha foydalanuvchilar va savollar o'chirildi!"}
@@ -297,8 +336,13 @@ def create_group(
     title: str = Form(...)
 ):
     """Yangi guruh yaratish (masalan: Matematika, Fizika)"""
+    logger.info(f"Creating group: {title}")
+    
     # Tokenni tekshirish
-    current_user = get_current_user(token)
+    current_user = get_current_user_by_token(token)
+    
+    if len(title.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Guruh nomi kamida 2 belgi bo'lishi kerak")
     
     # data.json ni yuklash
     data = load_data()
@@ -339,22 +383,34 @@ def create_group(
         group_id = 1
     
     save_data(data)
+    logger.info(f"Group '{title}' created successfully by {current_user.get('user')}")
     return {"message": f"'{title}' guruhi muvaffaqiyatli yaratildi", "group_id": group_id}
 
 @app.post("/questions", tags=["Questions"])
 def create_question(
     token: str = Form(...),
-    group_title: str = Form(...),  # Qaysi guruhga qo'shilishini belgilash
+    group_title: str = Form(...),
     text: str = Form(...),
     answer1: str = Form(...),
     answer2: str = Form(...),
     answer3: str = Form(...),
     answer4: str = Form(...),
     correct_answer: int = Form(..., ge=1, le=4),
-    image: Optional[UploadFile] = File(None)  # Rasm ixtiyoriy
+    image: Optional[UploadFile] = File(None)
 ):
+    """Yangi savol yaratish"""
+    logger.info(f"Creating question for group: {group_title}")
+    
     # Tokenni tekshirish
-    current_user = get_current_user(token)
+    current_user = get_current_user_by_token(token)
+    
+    # Validation
+    if len(text.strip()) < 5:
+        raise HTTPException(status_code=400, detail="Savol matni kamida 5 belgi bo'lishi kerak")
+    
+    for i, answer in enumerate([answer1, answer2, answer3, answer4], 1):
+        if len(answer.strip()) < 1:
+            raise HTTPException(status_code=400, detail=f"{i}-javob bo'sh bo'lmasligi kerak")
     
     # Javoblar ro'yxati
     answers = [
@@ -368,23 +424,26 @@ def create_question(
     image_path = None
     if image and hasattr(image, 'filename') and image.filename and image.size > 0:
         # File type validation
-        allowed_types = os.getenv("ALLOWED_IMAGE_TYPES", "image/jpeg,image/png").split(",")
+        allowed_types = ["image/jpeg", "image/png", "image/jpg"]
         if image.content_type not in allowed_types:
-            raise HTTPException(status_code=400, detail=f"Faqat {', '.join(allowed_types)} formatlar ruxsat etilgan")
+            raise HTTPException(status_code=400, detail=f"Faqat JPG, PNG formatlar ruxsat etilgan")
         
-        # File size validation
-        max_size = int(os.getenv("MAX_FILE_SIZE", "5242880"))  # 5MB default
+        # File size validation (5MB)
+        max_size = 5 * 1024 * 1024  # 5MB
         if image.size > max_size:
-            max_size_mb = max_size / (1024 * 1024)
-            raise HTTPException(status_code=400, detail=f"Rasm hajmi {max_size_mb}MB dan oshmasligi kerak")
+            raise HTTPException(status_code=400, detail=f"Rasm hajmi 5MB dan oshmasligi kerak")
         
         # Generate unique filename
         image_filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{image.filename}"
         image_path = os.path.join(UPLOADS_DIR, image_filename)
         
         # Save file
-        with open(image_path, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
+        try:
+            with open(image_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+        except Exception as e:
+            logger.error(f"Error saving image: {e}")
+            raise HTTPException(status_code=500, detail="Rasmni saqlashda xatolik")
     
     # Savolni yaratish
     question = {
@@ -419,7 +478,7 @@ def create_question(
             "quations": [
                 {
                     "id": 1,
-                    "title": "Umumiy",
+                    "title": group_title,
                     "quations": [question]
                 }
             ]
@@ -427,31 +486,36 @@ def create_question(
         data.append(new_user_data)
     
     save_data(data)
+    logger.info(f"Question created successfully in group '{group_title}' by {current_user.get('user')}")
     return {"message": f"Savol '{group_title}' guruhiga muvaffaqiyatli qo'shildi", "question_id": question["id"]}
 
 @app.get("/questions/all", tags=["Questions"])
-def get_all_user_questions(current_user: dict = Depends(get_current_user)):
+def get_all_user_questions(current_user: dict = Depends(get_current_user_by_header)):
     """Foydalanuvchi o'zi yaratgan barcha savollarni olish"""
+    logger.info(f"Getting all questions for user: {current_user.get('user')}")
+    
     data = load_data()
     
     # Faqat o'zi yaratgan savollarni olish
     user_data = next((ud for ud in data if ud.get("user_id") == current_user.get("id")), None)
     
     if not user_data:
-        return []
+        return {"quations": []}
     
     return user_data
 
 @app.get("/questions/test", tags=["Questions"])
 def get_test_questions(
     token: str = Query(...),
-    group_title: str = Query(..., description="Qaysi guruhdan savollar olinadi (masalan: Matematika, Fizika)"),
+    group_title: str = Query(..., description="Qaysi guruhdan savollar olinadi"),
     shuffle_questions: bool = Query(True, description="Savollarni aralashtirish"),
     shuffle_answers: bool = Query(True, description="Javoblarni aralashtirish")
 ):
     """Ma'lum bir guruhdan test savollarini aralashtirib berish"""
+    logger.info(f"Getting test questions for group: {group_title}")
+    
     # Tokenni tekshirish
-    current_user = get_current_user(token)
+    current_user = get_current_user_by_token(token)
     
     # data.json ni yuklash
     data = load_data()
@@ -481,7 +545,7 @@ def get_test_questions(
             "id": question.get("id"),
             "group_title": group_title,
             "text": question.get("text"),
-            "answers": question.get("answers", []).copy(),  # Javoblarni nusxalash
+            "answers": question.get("answers", []).copy(),
             "image": question.get("image"),
             "created_at": question.get("created_at")
         }
@@ -503,6 +567,7 @@ def get_test_questions(
         for question in group_questions:
             random.shuffle(question["answers"])
     
+    logger.info(f"Returning {len(group_questions)} questions for group '{group_title}'")
     return {
         "message": f"'{group_title}' guruhidan {len(group_questions)} ta savol aralashtirildi",
         "group_title": group_title,
@@ -519,4 +584,12 @@ if __name__ == "__main__":
     import uvicorn
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
+    
+    print(f"""
+🚀 UzQuiz Craft Backend ishga tushmoqda...
+📍 Server: http://{host}:{port}
+📋 API Docs: http://{host}:{port}/docs
+🔍 Health Check: http://{host}:{port}/health
+    """)
+    
     uvicorn.run(app, host=host, port=port)

@@ -49,7 +49,7 @@ HOST=0.0.0.0
 PORT=8000
 
 # CORS Configuration
-ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+ALLOWED_ORIGINS=https://it-zone.uz,https://www.it-zone.uz
 
 # File Upload Configuration
 MAX_FILE_SIZE=5242880
@@ -73,16 +73,16 @@ pip install gunicorn
 gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
-Server `http://localhost:8000` da ishga tushadi.
+Server `https://it-zone.uz` da ishga tushadi.
 
 ## 📚 API Dokumentatsiya
 
 ### Swagger UI
-- URL: `http://localhost:8000/docs`
+- URL: `https://it-zone.uz/docs`
 - Interactive API documentation
 
 ### ReDoc
-- URL: `http://localhost:8000/redoc`
+- URL: `https://it-zone.uz/redoc`
 - Alternative documentation format
 
 ## 🔐 API Endpoints
@@ -355,7 +355,7 @@ server {
 
 ### Health Check
 ```bash
-curl http://localhost:8000/health
+curl https://it-zone.uz/health
 ```
 
 ### Logs
