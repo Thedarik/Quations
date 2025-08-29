@@ -17,6 +17,7 @@ import shutil
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
+from reportlab.lib import colors
 from io import BytesIO
 import zipfile  # ZIP fayllar uchun yangi import
 
@@ -713,16 +714,80 @@ def get_multi_questions_pdf(
             c = canvas.Canvas(pdf_buffer, pagesize=A4)
             width, height = A4
             
-            # Font sozlamalari
-            c.setFont("Helvetica-Bold", 14)
-            c.drawString(50, height - 30, f"Variant {variant} - {group_title}")
-            y = height - 50  # Tepadan boshlash (margins)
+            # A4 o'lchamlari va margins
+            margin_left = 60
+            margin_right = 60
+            margin_top = 60
+            margin_bottom = 60
+            content_width = width - margin_left - margin_right
             
+            # Title (Guruh nomi) - eng tepada katta va aniq
+            c.setFont("Helvetica-Bold", 20)
+            title_text = f"Variant {variant} - {group_title}"
+            
+            # Title'ni markazga joylash
+            title_width = c.stringWidth(title_text, "Helvetica-Bold", 20)
+            title_x = margin_left + (content_width - title_width) / 2
+            c.drawString(title_x, height - margin_top, title_text)
+            
+            # Chiziq chizish (title ostida)
+            c.setStrokeColor(colors.black)
+            c.setLineWidth(2)
+            c.line(margin_left, height - margin_top - 15, width - margin_right, height - margin_top - 15)
+            
+            y = height - margin_top - 50  # Title'dan past bo'sh joy
+            
+            # Savollar
             for idx, q in enumerate(questions_copy, 1):
-                # Savol matni (bold)
-                c.setFont("Helvetica-Bold", 12)
-                c.drawString(50, y, f"{idx}. {q['text']}")
-                y -= 30  # Bo'sh joy
+                # Savol raqami va matni
+                c.setFont("Helvetica-Bold", 14)
+                question_text = f"{idx}. {q['text']}"
+                
+                # Uzun matnlarni qatorlarga bo'lish
+                lines = []
+                words = question_text.split()
+                current_line = ""
+                
+                for word in words:
+                    test_line = current_line + " " + word if current_line else word
+                    if c.stringWidth(test_line, "Helvetica-Bold", 14) <= content_width:
+                        current_line = test_line
+                    else:
+                        if current_line:
+                            lines.append(current_line)
+                        current_line = word
+                
+                if current_line:
+                    lines.append(current_line)
+                
+                # Agar juda uzun so'z bo'lsa, uni character-based bo'lish
+                final_lines = []
+                for line in lines:
+                    if c.stringWidth(line, "Helvetica-Bold", 14) <= content_width:
+                        final_lines.append(line)
+                    else:
+                        # Character-based bo'lish
+                        chars = list(line)
+                        current_char_line = ""
+                        for char in chars:
+                            test_char_line = current_char_line + char
+                            if c.stringWidth(test_char_line, "Helvetica-Bold", 14) <= content_width:
+                                current_char_line = test_char_line
+                            else:
+                                if current_char_line:
+                                    final_lines.append(current_char_line)
+                                current_char_line = char
+                        if current_char_line:
+                            final_lines.append(current_char_line)
+                
+                lines = final_lines
+                
+                # Savol matnini yozish
+                for line in lines:
+                    c.drawString(margin_left, y, line)
+                    y -= 20
+                
+                y -= 10  # Savol va javoblar orasida bo'sh joy
                 
                 # Rasm bo'lsa, qo'shish
                 if q.get('image'):
@@ -730,32 +795,89 @@ def get_multi_questions_pdf(
                         img = ImageReader(q['image'])
                         img_width, img_height = img.getSize()
                         aspect = img_height / float(img_width) if img_width != 0 else 1
-                        draw_width = width - 100  # Sahifa kengligiga moslash
+                        draw_width = min(content_width, 300)  # Maksimal kenglik
                         draw_height = draw_width * aspect
                         if draw_height > 200:  # Maksimal balandlik cheklovi
                             draw_height = 200
                             draw_width = draw_height / aspect
-                        c.drawImage(img, 50, y - draw_height, width=draw_width, height=draw_height)
+                        
+                        # Rasmni markazga joylash
+                        img_x = margin_left + (content_width - draw_width) / 2
+                        c.drawImage(img, img_x, y - draw_height, width=draw_width, height=draw_height)
                         y -= draw_height + 20
                     except Exception as e:
                         logger.error(f"Rasm yuklashda xato (Variant {variant}): {e}")
                         c.setFont("Helvetica", 10)
-                        c.drawString(50, y, "[Rasm yuklanmadi]")
+                        c.drawString(margin_left, y, "[Rasm yuklanmadi]")
                         y -= 20
                 
-                # Javob variantlari (oddiy font)
+                # Javob variantlari
                 c.setFont("Helvetica", 12)
                 for ans_idx, ans in enumerate(q['answers'], 1):
-                    c.drawString(70, y, f"{chr(64 + ans_idx)}. {ans['text']}")  # A., B., C., D. formatida
-                    y -= 20
+                    answer_text = f"{chr(64 + ans_idx)}. {ans['text']}"
+                    
+                    # Javob matnini ham qatorlarga bo'lish
+                    answer_lines = []
+                    answer_words = answer_text.split()
+                    current_answer_line = ""
+                    
+                    for word in answer_words:
+                        test_answer_line = current_answer_line + " " + word if current_answer_line else word
+                        if c.stringWidth(test_answer_line, "Helvetica", 12) <= content_width - 20:
+                            current_answer_line = test_answer_line
+                        else:
+                            if current_answer_line:
+                                answer_lines.append(current_answer_line)
+                            current_answer_line = word
+                    
+                    if current_answer_line:
+                        answer_lines.append(current_answer_line)
+                    
+                    # Agar juda uzun javob bo'lsa, uni character-based bo'lish
+                    final_answer_lines = []
+                    for answer_line in answer_lines:
+                        if c.stringWidth(answer_line, "Helvetica", 12) <= content_width - 20:
+                            final_answer_lines.append(answer_line)
+                        else:
+                            # Character-based bo'lish
+                            chars = list(answer_line)
+                            current_char_line = ""
+                            for char in chars:
+                                test_char_line = current_char_line + char
+                                if c.stringWidth(test_char_line, "Helvetica", 12) <= content_width - 20:
+                                    current_char_line = test_char_line
+                                else:
+                                    if current_char_line:
+                                        final_answer_lines.append(current_char_line)
+                                    current_char_line = char
+                            if current_char_line:
+                                final_answer_lines.append(current_char_line)
+                    
+                    answer_lines = final_answer_lines
+                    
+                    # Javoblarni yozish
+                    for answer_line in answer_lines:
+                        c.drawString(margin_left + 20, y, answer_line)
+                        y -= 18
                 
-                y -= 40  # Savollar orasida bo'sh joy
+                y -= 25  # Savollar orasida bo'sh joy
                 
                 # Agar sahifa pastki qismiga yetib qolsa, yangi sahifa
-                if y < 100:
+                if y < margin_bottom + 100:
                     c.showPage()
-                    y = height - 50
-                    c.setFont("Helvetica-Bold", 14)
+                    y = height - margin_top
+                    # Yangi sahifada title'ni qayta yozish
+                    c.setFont("Helvetica-Bold", 20)
+                    title_width = c.stringWidth(title_text, "Helvetica-Bold", 20)
+                    title_x = margin_left + (content_width - title_width) / 2
+                    c.drawString(title_x, y, title_text)
+                    
+                    # Chiziq chizish
+                    c.setStrokeColor(colors.black)
+                    c.setLineWidth(2)
+                    c.line(margin_left, y - 15, width - margin_right, y - 15)
+                    
+                    y -= 50
             
             c.save()
             pdf_buffer.seek(0)
