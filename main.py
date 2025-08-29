@@ -18,6 +18,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from io import BytesIO
+import zipfile  # ZIP fayllar uchun yangi import
 
 # -------------------------------------------------
 # App meta
@@ -242,7 +243,7 @@ def health_check():
     }
 
 # -------------------------------------------------
-# Auth endpoints - TUZATILGAN!
+# Auth endpoints
 # -------------------------------------------------
 @app.post("/register", tags=["Authentication"])
 def register(username: str = Form(...), password: str = Form(...)):
@@ -474,7 +475,7 @@ def create_question(
         question["id"] = len(target_group["quations"]) + 1
         target_group["quations"].append(question)
     else:
-        # Yangi foydalanuvchi uchun avtomatik "Umumiy" guruh yaratish
+        # Yangi foydalanuvchi uchun avtomatik guruh yaratish
         new_user_data = {
             "id": len(data) + 1,
             "user_id": current_user.get("id"),
@@ -592,7 +593,7 @@ def get_questions_pdf(
     # Tokenni tekshirish va foydalanuvchini olish
     current_user = get_current_user_by_token(token)
     
-    # Guruh savollarini olish (avvalgi logikaga o'xshash)
+    # Guruh savollarini olish
     data = load_data()
     user_data = next((ud for ud in data if ud.get("user_id") == current_user.get("id")), None)
     
@@ -614,8 +615,8 @@ def get_questions_pdf(
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     
-    # Font sozlamalari (chiroyli ko'rinish uchun)
-    c.setFont("Helvetica-Bold", 14)  # Savol uchun qalin font
+    # Font sozlamalari
+    c.setFont("Helvetica-Bold", 14)
     y = height - 50  # Tepadan boshlash (margins)
     
     for idx, q in enumerate(questions, 1):
@@ -665,6 +666,111 @@ def get_questions_pdf(
         "Content-Disposition": f"attachment; filename={group_title}_questions.pdf"
     }
     return StreamingResponse(buffer, media_type="application/pdf", headers=headers)
+
+@app.get("/questions/multi-pdf", tags=["Questions"])
+def get_multi_questions_pdf(
+    token: str = Query(...),
+    group_title: str = Query(..., description="Qaysi guruhdan savollar olinadi"),
+    num_variants: int = Query(..., ge=1, le=50, description="Chalkashtirish variantlari soni (maksimal 50)")
+):
+    """Berilgan guruh savollarini bir nechta chalkashtirilgan variantlarda PDF fayllar sifatida ZIP arxivida qaytarish"""
+    logger.info(f"Generating {num_variants} PDF variants for group: {group_title}")
+    
+    # Tokenni tekshirish va foydalanuvchini olish
+    current_user = get_current_user_by_token(token)
+    
+    # Guruh savollarini olish
+    data = load_data()
+    user_data = next((ud for ud in data if ud.get("user_id") == current_user.get("id")), None)
+    
+    if not user_data:
+        raise HTTPException(status_code=404, detail="Foydalanuvchi ma'lumotlari topilmadi")
+    
+    target_group = next((g for g in user_data.get("quations", []) if g.get("title") == group_title), None)
+    
+    if not target_group:
+        raise HTTPException(status_code=404, detail=f"'{group_title}' nomli guruh topilmadi")
+    
+    questions = target_group.get("quations", [])
+    
+    if not questions:
+        raise HTTPException(status_code=404, detail=f"'{group_title}' guruhida savollar topilmadi")
+    
+    # ZIP arxivini yaratish
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for variant in range(1, num_variants + 1):
+            # Savollarni chalkashtirish
+            questions_copy = [q.copy() for q in questions]
+            for q in questions_copy:
+                q['answers'] = q['answers'].copy()  # Javoblarni nusxalash
+            random.shuffle(questions_copy)  # Savollarni aralashtirish
+            for q in questions_copy:
+                random.shuffle(q['answers'])  # Har bir savolning javoblarini aralashtirish
+            
+            # PDF generatsiya
+            pdf_buffer = BytesIO()
+            c = canvas.Canvas(pdf_buffer, pagesize=A4)
+            width, height = A4
+            
+            # Font sozlamalari
+            c.setFont("Helvetica-Bold", 14)
+            c.drawString(50, height - 30, f"Variant {variant} - {group_title}")
+            y = height - 50  # Tepadan boshlash (margins)
+            
+            for idx, q in enumerate(questions_copy, 1):
+                # Savol matni (bold)
+                c.setFont("Helvetica-Bold", 12)
+                c.drawString(50, y, f"{idx}. {q['text']}")
+                y -= 30  # Bo'sh joy
+                
+                # Rasm bo'lsa, qo'shish
+                if q.get('image'):
+                    try:
+                        img = ImageReader(q['image'])
+                        img_width, img_height = img.getSize()
+                        aspect = img_height / float(img_width) if img_width != 0 else 1
+                        draw_width = width - 100  # Sahifa kengligiga moslash
+                        draw_height = draw_width * aspect
+                        if draw_height > 200:  # Maksimal balandlik cheklovi
+                            draw_height = 200
+                            draw_width = draw_height / aspect
+                        c.drawImage(img, 50, y - draw_height, width=draw_width, height=draw_height)
+                        y -= draw_height + 20
+                    except Exception as e:
+                        logger.error(f"Rasm yuklashda xato (Variant {variant}): {e}")
+                        c.setFont("Helvetica", 10)
+                        c.drawString(50, y, "[Rasm yuklanmadi]")
+                        y -= 20
+                
+                # Javob variantlari (oddiy font)
+                c.setFont("Helvetica", 12)
+                for ans_idx, ans in enumerate(q['answers'], 1):
+                    c.drawString(70, y, f"{chr(64 + ans_idx)}. {ans['text']}")  # A., B., C., D. formatida
+                    y -= 20
+                
+                y -= 40  # Savollar orasida bo'sh joy
+                
+                # Agar sahifa pastki qismiga yetib qolsa, yangi sahifa
+                if y < 100:
+                    c.showPage()
+                    y = height - 50
+                    c.setFont("Helvetica-Bold", 14)
+            
+            c.save()
+            pdf_buffer.seek(0)
+            
+            # PDF ni ZIP ga qo'shish
+            zip_file.writestr(f"{group_title}_variant_{variant}.pdf", pdf_buffer.getvalue())
+    
+    zip_buffer.seek(0)
+    
+    # ZIP ni response sifatida qaytarish
+    headers = {
+        "Content-Disposition": f"attachment; filename={group_title}_variants.zip"
+    }
+    logger.info(f"Generated {num_variants} PDF variants for group '{group_title}'")
+    return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
 
 # -------------------------------------------------
 # Run

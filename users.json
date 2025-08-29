@@ -3,7 +3,7 @@
     "id": 1,
     "user": "Samandar",
     "hashed_password": "$2b$12$8/VFTGkeevFH3uy92b4GVOalrnFmhDUBY/q6accLK2arImLf73rR.",
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJTYW1hbmRhciIsImV4cCI6MTc1NjExNjAwNn0.vr_IoZK5CSzZ7Wfl986OOiIzf_FozB_6i_9xALgVwPI",
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJTYW1hbmRhciIsImV4cCI6MTc1NjI5OTA2MX0.SO7bY7x-1NkFZ0uxOx1G-d8KkdSw2RpJ6i116Xk3Xqs",
     "created_at": "2025-08-24T18:42:54.986397"
   }
 ]
